@@ -10,6 +10,7 @@ import pandas as pd
 import psycopg2
 from sqlalchemy import create_engine
 import logging
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -54,6 +55,21 @@ def parse_element(element):
             data[tag] = get_text(child)
     return data
 
+# Serialize nested data
+def serialize_nested_data(df):
+    """Convert nested structures into JSON strings for database storage.
+
+    Args:
+        df (pd.DataFrame): DataFrame with potentially nested data.
+
+    Returns:
+        pd.DataFrame: DataFrame with nested columns serialized as JSON strings.
+    """
+    for column in df.columns:
+        if df[column].apply(lambda x: isinstance(x, dict)).any():
+            df[column] = df[column].apply(json.dumps)
+    return df
+
 # Extract all sections dynamically
 def parse_all_sections():
     """Parse all sections of the XML file dynamically.
@@ -82,7 +98,9 @@ def data_to_dataframes(parsed_data):
     logging.info("Converting parsed data to DataFrames")
     dataframes = {}
     for section, items in parsed_data.items():
-        dataframes[section] = pd.DataFrame(items)
+        df = pd.DataFrame(items)
+        df = serialize_nested_data(df)  # Serialize nested data to JSON strings
+        dataframes[section] = df
     logging.info("Conversion to DataFrames complete")
     return dataframes
 
@@ -123,13 +141,16 @@ logging.info("Data successfully ingested into the PostgreSQL database")
 3. **Recursive Parsing (`parse_element`):**
    - Handles nested XML structures, ensuring all data is captured.
 
-4. **DataFrames:**
+4. **Serialization (`serialize_nested_data`):**
+   - Converts nested structures into JSON strings for storage in the database.
+
+5. **DataFrames:**
    - Each section is converted into a Pandas DataFrame for easy manipulation.
 
-5. **Database Insertion:**
+6. **Database Insertion:**
    - DataFrames are saved to PostgreSQL tables using SQLAlchemy, with table names derived from section names.
 
-6. **Output:**
+7. **Output:**
    - The script prints the first few rows of each DataFrame and confirms data ingestion into PostgreSQL.
 
 ### Prerequisites
@@ -148,4 +169,5 @@ logging.info("Data successfully ingested into the PostgreSQL database")
 ### Notes
 - Ensure the XML file path is correct.
 - This approach dynamically parses all sections of the XML file, making it flexible for unknown formats.
+- Nested structures are serialized into JSON strings for database compatibility.
 
