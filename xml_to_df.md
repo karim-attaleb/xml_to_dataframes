@@ -33,129 +33,81 @@ def get_text(element):
     """
     return element.text if element is not None else None
 
-# Extract header details
-def parse_header():
-    """Parse the header section of the XML file.
+# Recursive function to parse all nested XML elements
+def parse_element(element):
+    """Parse an XML element and its children into a dictionary.
+
+    Args:
+        element (ET.Element): XML element to parse.
 
     Returns:
-        pd.DataFrame: DataFrame containing header information.
+        dict: Parsed data from the XML element.
     """
-    logging.info("Parsing header section")
-    header = root.find('ns0:Header', ns)
-    if header is not None:
-        header_data = {child.tag.split('}')[-1]: get_text(child) for child in header}
-        logging.info("Header section parsed successfully")
-        return pd.DataFrame([header_data])
-    logging.warning("Header section not found")
-    return pd.DataFrame()
+    data = {}
+    for child in element:
+        tag = child.tag.split('}')[-1]
+        if len(child):
+            # If the element has children, parse them recursively
+            data[tag] = parse_element(child)
+        else:
+            # Otherwise, extract the text
+            data[tag] = get_text(child)
+    return data
 
-# Extract cancelled business units
-def parse_cancelled_units():
-    """Parse the cancelled business units section of the XML file.
+# Extract all sections dynamically
+def parse_all_sections():
+    """Parse all sections of the XML file dynamically.
 
     Returns:
-        pd.DataFrame: DataFrame containing cancelled business unit numbers.
+        dict: Parsed data organized by section.
     """
-    logging.info("Parsing cancelled business units section")
-    cancelled_units = root.find('ns0:CancelledBusinessUnits', ns)
-    if cancelled_units is not None:
-        units = [get_text(child) for child in cancelled_units.findall('ns0:CancelledBusinessUnitNumber', ns)]
-        logging.info("Cancelled business units section parsed successfully")
-        return pd.DataFrame(units, columns=['CancelledBusinessUnitNumber'])
-    logging.warning("Cancelled business units section not found")
-    return pd.DataFrame()
+    logging.info("Parsing all sections dynamically")
+    sections = {}
+    for child in root:
+        section_name = child.tag.split('}')[-1]
+        sections[section_name] = [parse_element(item) for item in child]
+    logging.info("All sections parsed successfully")
+    return sections
 
-# Extract enterprise details
-def parse_enterprises():
-    """Parse the enterprises section of the XML file.
+# Convert parsed data to DataFrames
+def data_to_dataframes(parsed_data):
+    """Convert parsed XML data into a dictionary of DataFrames.
+
+    Args:
+        parsed_data (dict): Parsed XML data.
 
     Returns:
-        pd.DataFrame: DataFrame containing enterprise details.
+        dict: DataFrames organized by section name.
     """
-    logging.info("Parsing enterprises section")
-    enterprises = root.findall('ns0:Enterprises/ns0:Enterprise', ns)
-    data = []
-    for enterprise in enterprises:
-        enterprise_data = {
-            'Nbr': get_text(enterprise.find('ns0:Nbr', ns)),
-            'RegistrationDate': get_text(enterprise.find('ns0:RegistrationDate', ns)),
-            'Type': get_text(enterprise.find('ns0:Type', ns)),
-            'Status': get_text(enterprise.find('ns0:Status', ns)),
-            'Capital': get_text(enterprise.find('ns0:Capital', ns)),
-            'Currency': get_text(enterprise.find('ns0:Currency', ns)),
-        }
-        data.append(enterprise_data)
-    logging.info("Enterprises section parsed successfully")
-    return pd.DataFrame(data)
-
-# Extract business unit details
-def parse_business_units():
-    """Parse the business units section of the XML file.
-
-    Returns:
-        pd.DataFrame: DataFrame containing business unit details.
-    """
-    logging.info("Parsing business units section")
-    business_units = root.findall('ns0:BusinessUnits/ns0:BusinessUnit', ns)
-    data = []
-    for unit in business_units:
-        unit_data = {
-            'Number': get_text(unit.find('ns0:Number', ns)),
-            'RegistrationDate': get_text(unit.find('ns0:RegistrationDate', ns)),
-            'Status': get_text(unit.find('ns0:Status', ns)),
-        }
-        data.append(unit_data)
-    logging.info("Business units section parsed successfully")
-    return pd.DataFrame(data)
-
-# Extract footer details
-def parse_footer():
-    """Parse the footer section of the XML file.
-
-    Returns:
-        pd.DataFrame: DataFrame containing footer information.
-    """
-    logging.info("Parsing footer section")
-    footer = root.find('ns0:Footer', ns)
-    if footer is not None:
-        footer_data = {child.tag.split('}')[-1]: get_text(child) for child in footer}
-        logging.info("Footer section parsed successfully")
-        return pd.DataFrame([footer_data])
-    logging.warning("Footer section not found")
-    return pd.DataFrame()
+    logging.info("Converting parsed data to DataFrames")
+    dataframes = {}
+    for section, items in parsed_data.items():
+        dataframes[section] = pd.DataFrame(items)
+    logging.info("Conversion to DataFrames complete")
+    return dataframes
 
 # Main processing
 logging.info("Starting XML parsing and data extraction")
-header_df = parse_header()
-cancelled_units_df = parse_cancelled_units()
-enterprises_df = parse_enterprises()
-business_units_df = parse_business_units()
-footer_df = parse_footer()
+parsed_data = parse_all_sections()
+dataframes = data_to_dataframes(parsed_data)
 logging.info("Data extraction complete")
 
 # Save or display results
 logging.info("Displaying parsed data")
-print("Header Data:")
-print(header_df.head())
-print("\nCancelled Business Units:")
-print(cancelled_units_df.head())
-print("\nEnterprises:")
-print(enterprises_df.head())
-print("\nBusiness Units:")
-print(business_units_df.head())
-print("\nFooter Data:")
-print(footer_df.head())
+for section, df in dataframes.items():
+    print(f"\nSection: {section}")
+    print(df.head())
 
 # Save data to PostgreSQL database
 logging.info("Saving data to PostgreSQL database")
 pg_connection_string = 'postgresql+psycopg2://username:password@host:port/database'  # Update with your PostgreSQL details
 engine = create_engine(pg_connection_string)
 
-header_df.to_sql('header', engine, if_exists='replace', index=False)
-cancelled_units_df.to_sql('cancelled_business_units', engine, if_exists='replace', index=False)
-enterprises_df.to_sql('enterprises', engine, if_exists='replace', index=False)
-business_units_df.to_sql('business_units', engine, if_exists='replace', index=False)
-footer_df.to_sql('footer', engine, if_exists='replace', index=False)
+for section, df in dataframes.items():
+    table_name = section.lower()
+    df.to_sql(table_name, engine, if_exists='replace', index=False)
+    logging.info(f"Data for section '{section}' saved to table '{table_name}'")
+
 logging.info("Data successfully ingested into the PostgreSQL database")
 ```
 
@@ -165,17 +117,17 @@ logging.info("Data successfully ingested into the PostgreSQL database")
    - The `ns` dictionary defines the namespace for parsing.
    - The XML file is loaded and parsed using `xml.etree.ElementTree`.
 
-2. **Helper Function (`get_text`):**
-   - Ensures safe extraction of text from XML elements.
+2. **Dynamic Parsing (`parse_all_sections`):**
+   - Dynamically parses all sections of the XML file without hardcoding specific sections.
 
-3. **Section Parsers:**
-   - Functions like `parse_header`, `parse_cancelled_units`, etc., extract specific sections of the XML.
+3. **Recursive Parsing (`parse_element`):**
+   - Handles nested XML structures, ensuring all data is captured.
 
 4. **DataFrames:**
    - Each section is converted into a Pandas DataFrame for easy manipulation.
 
 5. **Database Insertion:**
-   - DataFrames are saved to PostgreSQL tables using SQLAlchemy.
+   - DataFrames are saved to PostgreSQL tables using SQLAlchemy, with table names derived from section names.
 
 6. **Output:**
    - The script prints the first few rows of each DataFrame and confirms data ingestion into PostgreSQL.
@@ -195,5 +147,5 @@ logging.info("Data successfully ingested into the PostgreSQL database")
 
 ### Notes
 - Ensure the XML file path is correct.
-- Adapt the script if additional XML sections need to be parsed.
+- This approach dynamically parses all sections of the XML file, making it flexible for unknown formats.
 
