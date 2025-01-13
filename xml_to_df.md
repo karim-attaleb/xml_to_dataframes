@@ -10,7 +10,6 @@ import pandas as pd
 import psycopg2
 from sqlalchemy import create_engine
 import logging
-import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -34,86 +33,70 @@ def get_text(element):
     """
     return element.text if element is not None else None
 
-# Recursive function to parse all nested XML elements
-def parse_element(element):
-    """Parse an XML element and its children into a dictionary.
+# Recursive function to parse all nested XML elements into normalized structures
+def parse_element_to_rows(element, parent_id=None, parent_name=None):
+    """Parse an XML element and its children into rows for normalized tables.
 
     Args:
         element (ET.Element): XML element to parse.
+        parent_id (str): ID of the parent row.
+        parent_name (str): Name of the parent element.
 
-    Returns:
-        dict: Parsed data from the XML element.
+    Yields:
+        tuple: (table_name, row_data, child_element) representing the table, row, and nested children.
     """
-    data = {}
+    row = {"parent_id": parent_id, "parent_name": parent_name}
+    table_name = element.tag.split('}')[-1]
+
     for child in element:
         tag = child.tag.split('}')[-1]
         if len(child):
-            # If the element has children, parse them recursively
-            data[tag] = parse_element(child)
+            # If the element has children, recurse
+            yield from parse_element_to_rows(child, parent_id=id(element), parent_name=table_name)
         else:
-            # Otherwise, extract the text
-            data[tag] = get_text(child)
-    return data
+            row[tag] = get_text(child)
 
-# Serialize nested data
-def serialize_nested_data(df):
-    """Convert nested structures into JSON strings for database storage.
+    yield table_name, row, element
 
-    Args:
-        df (pd.DataFrame): DataFrame with potentially nested data.
-
-    Returns:
-        pd.DataFrame: DataFrame with nested columns serialized as JSON strings.
-    """
-    for column in df.columns:
-        if df[column].apply(lambda x: isinstance(x, dict)).any():
-            df[column] = df[column].apply(json.dumps)
-    return df
-
-# Extract all sections dynamically
-def parse_all_sections():
-    """Parse all sections of the XML file dynamically.
-
-    Returns:
-        dict: Parsed data organized by section.
-    """
-    logging.info("Parsing all sections dynamically")
-    sections = {}
-    for child in root:
-        section_name = child.tag.split('}')[-1]
-        sections[section_name] = [parse_element(item) for item in child]
-    logging.info("All sections parsed successfully")
-    return sections
-
-# Convert parsed data to DataFrames
-def data_to_dataframes(parsed_data):
-    """Convert parsed XML data into a dictionary of DataFrames.
+# Normalize XML to multiple tables
+def normalize_xml_to_tables(root):
+    """Normalize XML into multiple related tables.
 
     Args:
-        parsed_data (dict): Parsed XML data.
+        root (ET.Element): Root of the XML document.
 
     Returns:
-        dict: DataFrames organized by section name.
+        dict: Dictionary of table names to rows.
     """
-    logging.info("Converting parsed data to DataFrames")
-    dataframes = {}
-    for section, items in parsed_data.items():
-        df = pd.DataFrame(items)
-        df = serialize_nested_data(df)  # Serialize nested data to JSON strings
-        dataframes[section] = df
-    logging.info("Conversion to DataFrames complete")
-    return dataframes
+    tables = {}
+    for table_name, row, _ in parse_element_to_rows(root):
+        if table_name not in tables:
+            tables[table_name] = []
+        tables[table_name].append(row)
+    return tables
+
+# Convert normalized tables to DataFrames
+def tables_to_dataframes(tables):
+    """Convert normalized tables into Pandas DataFrames.
+
+    Args:
+        tables (dict): Dictionary of table names to rows.
+
+    Returns:
+        dict: Dictionary of table names to DataFrames.
+    """
+    return {table: pd.DataFrame(rows) for table, rows in tables.items()}
 
 # Main processing
-logging.info("Starting XML parsing and data extraction")
-parsed_data = parse_all_sections()
-dataframes = data_to_dataframes(parsed_data)
-logging.info("Data extraction complete")
+logging.info("Starting XML parsing and normalization")
+normalized_tables = normalize_xml_to_tables(root)
+dataframes = tables_to_dataframes(normalized_tables)
+logging.info("Normalization complete")
 
 # Save or display results
 logging.info("Displaying parsed data")
-for section, df in dataframes.items():
-    print(f"\nSection: {section}")
+for table_name, df in dataframes.items():
+    print(f"\nTable: {table_name}")
     print(df.head())
 
 # Save data to PostgreSQL database
@@ -121,10 +104,9 @@ logging.info("Saving data to PostgreSQL database")
 pg_connection_string = 'postgresql+psycopg2://username:password@host:port/database'  # Update with your PostgreSQL details
 engine = create_engine(pg_connection_string)
 
-for section, df in dataframes.items():
-    table_name = section.lower()
+for table_name, df in dataframes.items():
     df.to_sql(table_name, engine, if_exists='replace', index=False)
-    logging.info(f"Data for section '{section}' saved to table '{table_name}'")
+    logging.info(f"Data for table '{table_name}' saved to PostgreSQL")
 
 logging.info("Data successfully ingested into the PostgreSQL database")
 ```
@@ -135,22 +117,19 @@ logging.info("Data successfully ingested into the PostgreSQL database")
    - The `ns` dictionary defines the namespace for parsing.
    - The XML file is loaded and parsed using `xml.etree.ElementTree`.
 
-2. **Dynamic Parsing (`parse_all_sections`):**
-   - Dynamically parses all sections of the XML file without hardcoding specific sections.
+2. **Recursive Parsing (`parse_element_to_rows`):**
+   - Handles nested XML structures by recursively generating rows for normalized tables.
 
-3. **Recursive Parsing (`parse_element`):**
-   - Handles nested XML structures, ensuring all data is captured.
+3. **Normalization (`normalize_xml_to_tables`):**
+   - Converts XML data into multiple related tables.
 
-4. **Serialization (`serialize_nested_data`):**
-   - Converts nested structures into JSON strings for storage in the database.
+4. **DataFrames:**
+   - Each table is converted into a Pandas DataFrame for easy manipulation.
 
-5. **DataFrames:**
-   - Each section is converted into a Pandas DataFrame for easy manipulation.
+5. **Database Insertion:**
+   - DataFrames are saved to PostgreSQL tables using SQLAlchemy, with table names derived from XML tags.
 
-6. **Database Insertion:**
-   - DataFrames are saved to PostgreSQL tables using SQLAlchemy, with table names derived from section names.
-
-7. **Output:**
+6. **Output:**
    - The script prints the first few rows of each DataFrame and confirms data ingestion into PostgreSQL.
 
 ### Prerequisites
@@ -168,6 +147,6 @@ logging.info("Data successfully ingested into the PostgreSQL database")
 
 ### Notes
 - Ensure the XML file path is correct.
-- This approach dynamically parses all sections of the XML file, making it flexible for unknown formats.
-- Nested structures are serialized into JSON strings for database compatibility.
+- This approach normalizes nested XML structures into relational tables.
+- Each table maintains references to parent rows for relational integrity.
 
