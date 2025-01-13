@@ -18,10 +18,23 @@ root = tree.getroot()
 
 # Helper function to safely extract text from an element
 def get_text(element):
+    """Safely extract text from an XML element.
+
+    Args:
+        element (ET.Element): XML element.
+
+    Returns:
+        str or None: Text content of the element or None if the element is missing.
+    """
     return element.text if element is not None else None
 
 # Extract header details
 def parse_header():
+    """Parse the header section of the XML file.
+
+    Returns:
+        pd.DataFrame: DataFrame containing header information.
+    """
     header = root.find('ns0:Header', ns)
     if header is not None:
         header_data = {child.tag.split('}')[-1]: get_text(child) for child in header}
@@ -30,6 +43,11 @@ def parse_header():
 
 # Extract cancelled business units
 def parse_cancelled_units():
+    """Parse the cancelled business units section of the XML file.
+
+    Returns:
+        pd.DataFrame: DataFrame containing cancelled business unit numbers.
+    """
     cancelled_units = root.find('ns0:CancelledBusinessUnits', ns)
     if cancelled_units is not None:
         units = [get_text(child) for child in cancelled_units.findall('ns0:CancelledBusinessUnitNumber', ns)]
@@ -38,6 +56,11 @@ def parse_cancelled_units():
 
 # Extract enterprise details
 def parse_enterprises():
+    """Parse the enterprises section of the XML file.
+
+    Returns:
+        pd.DataFrame: DataFrame containing enterprise details.
+    """
     enterprises = root.findall('ns0:Enterprises/ns0:Enterprise', ns)
     data = []
     for enterprise in enterprises:
@@ -54,6 +77,11 @@ def parse_enterprises():
 
 # Extract business unit details
 def parse_business_units():
+    """Parse the business units section of the XML file.
+
+    Returns:
+        pd.DataFrame: DataFrame containing business unit details.
+    """
     business_units = root.findall('ns0:BusinessUnits/ns0:BusinessUnit', ns)
     data = []
     for unit in business_units:
@@ -67,6 +95,11 @@ def parse_business_units():
 
 # Extract footer details
 def parse_footer():
+    """Parse the footer section of the XML file.
+
+    Returns:
+        pd.DataFrame: DataFrame containing footer information.
+    """
     footer = root.find('ns0:Footer', ns)
     if footer is not None:
         footer_data = {child.tag.split('}')[-1]: get_text(child) for child in footer}
